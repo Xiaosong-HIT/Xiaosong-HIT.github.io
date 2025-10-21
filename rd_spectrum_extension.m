@@ -24,20 +24,26 @@ for i = 1:N_chirp
     S_range(:,i) = fft(s_rd_matrix(:,i) .* win_range, Nfft_range);
 end
 
+% CRITICAL: FMCW雷达的差拍频率始终为正，只需要单边谱
+% 取前半部分（0 到 Fs/2，对应正频率）
+N_range_bins = Nfft_range/2;
+S_range = S_range(1:N_range_bins, :);  % 只保留正频率部分
+
 %% Doppler FFT（多普勒向FFT）
 Nfft_doppler = 2^nextpow2(N_chirp);
 % 对每一行（同一距离单元的所有chirp）加窗并做FFT
 win_doppler = hamming(N_chirp);
-S_rd = zeros(Nfft_range, Nfft_doppler);
-for i = 1:Nfft_range
+S_rd = zeros(N_range_bins, Nfft_doppler);  % 注意：行数改为N_range_bins
+for i = 1:N_range_bins
     S_rd(i,:) = fftshift(fft(S_range(i,:) .* win_doppler.', Nfft_doppler));
 end
 
 %% 计算坐标轴
 % 距离轴：基于Range FFT后的频率bin转换为实际距离
 % 在FMCW雷达中：f_beat = 2*k*R/c，因此 R = f_beat * c / (2*k)
+% IMPORTANT: 只使用正频率部分 [0, Fs/2]
 freq_res_range = Fs / Nfft_range;                               % 频率分辨率 [Hz]
-freq_axis_range = (0:Nfft_range-1) * freq_res_range;           % 频率轴 [Hz]
+freq_axis_range = (0:N_range_bins-1) * freq_res_range;         % 频率轴 [Hz]，只到Fs/2
 range_axis = freq_axis_range * c / (2*k);                       % 距离轴 [m]
 range_res = c / (2*B);                                          % 理论距离分辨率 [m]
 
@@ -110,9 +116,10 @@ S_range_rotor = zeros(Nfft_range, N_chirp);
 for i = 1:N_chirp
     S_range_rotor(:,i) = fft(s_rd_matrix_rotor(:,i) .* win_range, Nfft_range);
 end
+S_range_rotor = S_range_rotor(1:N_range_bins, :);  % 只保留正频率部分
 
-S_rd_rotor = zeros(Nfft_range, Nfft_doppler);
-for i = 1:Nfft_range
+S_rd_rotor = zeros(N_range_bins, Nfft_doppler);
+for i = 1:N_range_bins
     S_rd_rotor(i,:) = fftshift(fft(S_range_rotor(i,:) .* win_doppler.', Nfft_doppler));
 end
 
@@ -140,9 +147,10 @@ S_range_body = zeros(Nfft_range, N_chirp);
 for i = 1:N_chirp
     S_range_body(:,i) = fft(s_rd_matrix_body(:,i) .* win_range, Nfft_range);
 end
+S_range_body = S_range_body(1:N_range_bins, :);  % 只保留正频率部分
 
-S_rd_body = zeros(Nfft_range, Nfft_doppler);
-for i = 1:Nfft_range
+S_rd_body = zeros(N_range_bins, Nfft_doppler);
+for i = 1:N_range_bins
     S_rd_body(i,:) = fftshift(fft(S_range_body(i,:) .* win_doppler.', Nfft_doppler));
 end
 
@@ -189,10 +197,13 @@ fprintf('\n--- Max Unambiguous ---\n');
 R_max_sampling = (Fs/2) * c / (2*k);
 % 在真实多chirp雷达中，还受chirp时长限制（信号往返时间）
 R_max_chirp = c * Tc / 2;
-% 实际最大不模糊距离取两者较小值
-R_max_unamb = min(R_max_sampling, R_max_chirp);
-fprintf('Max unamb. range (sampling): %.2f m (%.1f km)\n', R_max_sampling, R_max_sampling/1e3);
-fprintf('Max unamb. range (chirp):    %.2f m (%.1f km)\n', R_max_chirp, R_max_chirp/1e3);
+% 基于实际FFT长度的最大可测距离
+R_max_fft = range_axis(end);
+% 实际最大不模糊距离取最小值
+R_max_unamb = min([R_max_sampling, R_max_chirp, R_max_fft]);
+fprintf('Max range (sampling):        %.2f m (%.1f km)\n', R_max_sampling, R_max_sampling/1e3);
+fprintf('Max range (chirp duration):  %.2f m (%.1f km)\n', R_max_chirp, R_max_chirp/1e3);
+fprintf('Max range (FFT):             %.2f m (%.1f km)\n', R_max_fft, R_max_fft/1e3);
 fprintf('Effective max range:         %.2f m (%.1f km)\n', R_max_unamb, R_max_unamb/1e3);
 % 最大不模糊速度：基于PRF = 1/Tc，最大多普勒 = PRF/2
 v_max_unamb = (1/(2*Tc)) * lambda/2;
