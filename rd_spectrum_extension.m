@@ -34,17 +34,30 @@ for i = 1:Nfft_range
 end
 
 %% 计算坐标轴
-% 距离轴
-range_res = c / (2*B);                          % 距离分辨率 [m]
-range_axis = (0:Nfft_range-1) * range_res;      % 距离轴 [m]
+% 距离轴：基于Range FFT后的频率bin转换为实际距离
+% 在FMCW雷达中：f_beat = 2*k*R/c，因此 R = f_beat * c / (2*k)
+freq_res_range = Fs / Nfft_range;                               % 频率分辨率 [Hz]
+freq_axis_range = (0:Nfft_range-1) * freq_res_range;           % 频率轴 [Hz]
+range_axis = freq_axis_range * c / (2*k);                       % 距离轴 [m]
+range_res = c / (2*B);                                          % 理论距离分辨率 [m]
 
 % 多普勒轴
-doppler_res = 1 / (N_chirp * Tc);               % 多普勒分辨率 [Hz]
+doppler_res = 1 / (N_chirp * Tc);                               % 多普勒分辨率 [Hz]
 doppler_axis = (-Nfft_doppler/2:Nfft_doppler/2-1) * doppler_res;  % 多普勒轴 [Hz]
 
 %% 绘制 RD 谱（dB形式）
 S_rd_dB = 20*log10(abs(S_rd) + 1e-12);
 S_rd_dB = S_rd_dB - max(S_rd_dB(:));  % 归一化到0 dB
+
+% 计算理论位置（用于确定显示范围）
+R_body_theory = R0 + v*(T/2);          % 机体理论距离
+fd_body_theory = 2*v/lambda;           % 机体理论多普勒
+
+% 设置显示范围：以理论位置为中心
+range_margin = 50;   % 距离方向显示余量 [m]
+doppler_margin = 10e3;  % 多普勒方向显示余量 [Hz]
+range_display = [max(0, R_body_theory-range_margin), R_body_theory+range_margin];
+doppler_display = [fd_body_theory-doppler_margin, fd_body_theory+doppler_margin];
 
 figure('Name','Range-Doppler Spectrum','Color','w','Position',[100 100 900 600]);
 imagesc(doppler_axis/1e3, range_axis, S_rd_dB);
@@ -56,13 +69,11 @@ xlabel('Doppler Frequency [kHz]');
 ylabel('Range [m]');
 title('Range-Doppler Spectrum (Total Signal: Body + Rotors)');
 grid on;
+xlim(doppler_display/1e3);
+ylim(range_display);
 
 % 添加参考线：理论机体位置
 hold on;
-% 机体理论距离
-R_body_theory = R0 + v*(T/2);
-% 机体理论多普勒
-fd_body_theory = 2*v/lambda;
 plot(fd_body_theory/1e3, R_body_theory, 'ro', 'MarkerSize', 10, 'LineWidth', 2);
 legend('RD Spectrum','Body (theory)','Location','best');
 
@@ -93,6 +104,8 @@ xlabel('Doppler Frequency [kHz]');
 ylabel('Range [m]');
 title('Range-Doppler Spectrum (Rotors Only, 4 rotors × 2 blades)');
 grid on;
+xlim(doppler_display/1e3);
+ylim(range_display);
 
 %% 仅绘制机体的RD谱（用于对比）
 s_if_body_rd = s_if_body(1:N_total_samples);
@@ -121,6 +134,8 @@ xlabel('Doppler Frequency [kHz]');
 ylabel('Range [m]');
 title('Range-Doppler Spectrum (Body Only)');
 grid on;
+xlim(doppler_display/1e3);
+ylim(range_display);
 hold on;
 plot(fd_body_theory/1e3, R_body_theory, 'ro', 'MarkerSize', 10, 'LineWidth', 2);
 legend('RD Spectrum','Body (theory)','Location','best');
@@ -130,9 +145,22 @@ fprintf('\n========== RD Spectrum Parameters ==========\n');
 fprintf('Chirp duration (Tc):        %.3f ms\n', Tc*1e3);
 fprintf('Number of chirps:           %d\n', N_chirp);
 fprintf('Samples per chirp:          %d\n', N_per_chirp);
+fprintf('Sampling rate:              %.2f MHz\n', Fs/1e6);
+fprintf('Chirp bandwidth:            %.2f MHz\n', B/1e6);
+fprintf('Chirp rate (k):             %.2e Hz/s\n', k);
+fprintf('\n--- Resolution ---\n');
 fprintf('Range resolution:           %.3f m\n', range_res);
 fprintf('Doppler resolution:         %.3f Hz\n', doppler_res);
-fprintf('Max unambiguous range:      %.2f m\n', Nfft_range*range_res/2);
-fprintf('Max unambiguous velocity:   %.2f m/s\n', doppler_res*Nfft_doppler/2*lambda/2);
-fprintf('Body theory: R=%.2f m, fd=%.2f Hz\n', R_body_theory, fd_body_theory);
+fprintf('Frequency resolution:       %.2f Hz\n', freq_res_range);
+fprintf('\n--- Max Unambiguous ---\n');
+fprintf('Max unambiguous range:      %.2f m\n', range_axis(end));
+fprintf('Max unambiguous velocity:   %.2f m/s\n', doppler_axis(end)*lambda/2);
+fprintf('\n--- Body Theoretical Values ---\n');
+fprintf('Body position (R):          %.2f m\n', R_body_theory);
+fprintf('Body velocity (v):          %.2f m/s\n', v);
+fprintf('Body Doppler (fd):          %.2f Hz (%.3f kHz)\n', fd_body_theory, fd_body_theory/1e3);
+fprintf('Expected beat freq:         %.2f Hz (%.3f kHz)\n', 2*k*R_body_theory/c, 2*k*R_body_theory/c/1e3);
+fprintf('\n--- Display Range ---\n');
+fprintf('Range display:              [%.1f, %.1f] m\n', range_display(1), range_display(2));
+fprintf('Doppler display:            [%.1f, %.1f] kHz\n', doppler_display(1)/1e3, doppler_display(2)/1e3);
 fprintf('==========================================\n\n');
