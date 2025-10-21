@@ -153,8 +153,13 @@ fprintf('Range resolution:           %.3f m\n', range_res);
 fprintf('Doppler resolution:         %.3f Hz\n', doppler_res);
 fprintf('Frequency resolution:       %.2f Hz\n', freq_res_range);
 fprintf('\n--- Max Unambiguous ---\n');
-fprintf('Max unambiguous range:      %.2f m\n', range_axis(end));
-fprintf('Max unambiguous velocity:   %.2f m/s\n', doppler_axis(end)*lambda/2);
+% 最大不模糊距离：基于奈奎斯特，最大差拍频率 = Fs/2
+R_max_unamb = (Fs/2) * c / (2*k);
+fprintf('Max unambiguous range:      %.2f m\n', R_max_unamb);
+% 最大不模糊速度：基于PRF = 1/Tc，最大多普勒 = PRF/2
+v_max_unamb = (1/(2*Tc)) * lambda/2;
+fprintf('Max unambiguous velocity:   %.2f m/s\n', v_max_unamb);
+fprintf('PRF (pulse repetition freq): %.2f Hz\n', 1/Tc);
 fprintf('\n--- Body Theoretical Values ---\n');
 fprintf('Body position (R):          %.2f m\n', R_body_theory);
 fprintf('Body velocity (v):          %.2f m/s\n', v);
