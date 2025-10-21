@@ -51,13 +51,31 @@ S_rd_dB = S_rd_dB - max(S_rd_dB(:));  % 归一化到0 dB
 
 % 计算理论位置（用于确定显示范围）
 R_body_theory = R0 + v*(T/2);          % 机体理论距离
-fd_body_theory = 2*v/lambda;           % 机体理论多普勒
+fd_body_theory = 2*v/lambda;           % 机体理论多普勒（真实值）
 
-% 设置显示范围：以理论位置为中心
+% 计算PRF和速度模糊
+PRF = 1/Tc;                            % 脉冲重复频率
+fd_max_unamb = PRF/2;                  % 最大不模糊多普勒
+v_max_unamb = fd_max_unamb * lambda/2; % 最大不模糊速度
+
+% 检查并计算模糊后的多普勒频率
+% 将多普勒频率折叠到 [-PRF/2, PRF/2] 范围内
+fd_body_apparent = mod(fd_body_theory + fd_max_unamb, PRF) - fd_max_unamb;
+
+% 打印速度模糊警告
+if abs(v) > v_max_unamb
+    fprintf('\n⚠️  WARNING: Velocity Ambiguity Detected! ⚠️\n');
+    fprintf('Target velocity (%.2f m/s) exceeds max unambiguous velocity (±%.2f m/s)\n', v, v_max_unamb);
+    fprintf('True Doppler:     %.2f Hz (%.3f kHz)\n', fd_body_theory, fd_body_theory/1e3);
+    fprintf('Apparent Doppler: %.2f Hz (%.3f kHz) [aliased]\n', fd_body_apparent, fd_body_apparent/1e3);
+    fprintf('The target will appear at the APPARENT Doppler frequency in RD spectrum.\n\n');
+end
+
+% 设置显示范围：以实际显示的（可能模糊的）多普勒为中心
 range_margin = 50;   % 距离方向显示余量 [m]
 doppler_margin = 10e3;  % 多普勒方向显示余量 [Hz]
 range_display = [max(0, R_body_theory-range_margin), R_body_theory+range_margin];
-doppler_display = [fd_body_theory-doppler_margin, fd_body_theory+doppler_margin];
+doppler_display = [fd_body_apparent-doppler_margin, fd_body_apparent+doppler_margin];
 
 figure('Name','Range-Doppler Spectrum','Color','w','Position',[100 100 900 600]);
 imagesc(doppler_axis/1e3, range_axis, S_rd_dB);
@@ -74,8 +92,15 @@ ylim(range_display);
 
 % 添加参考线：理论机体位置
 hold on;
-plot(fd_body_theory/1e3, R_body_theory, 'ro', 'MarkerSize', 10, 'LineWidth', 2);
-legend('RD Spectrum','Body (theory)','Location','best');
+if abs(v) > v_max_unamb
+    % 如果有速度模糊，显示模糊后的位置（实际峰值位置）和真实位置
+    plot(fd_body_apparent/1e3, R_body_theory, 'ro', 'MarkerSize', 12, 'LineWidth', 2, 'MarkerFaceColor', 'r');
+    plot(fd_body_theory/1e3, R_body_theory, 'bx', 'MarkerSize', 12, 'LineWidth', 2);
+    legend('RD Spectrum','Body (apparent, aliased)','Body (true, out of range)','Location','best');
+else
+    plot(fd_body_theory/1e3, R_body_theory, 'ro', 'MarkerSize', 10, 'LineWidth', 2);
+    legend('RD Spectrum','Body (theory)','Location','best');
+end
 
 %% 仅绘制旋翼的RD谱（用于对比）
 s_if_rotor_rd = s_if_rotor(1:N_total_samples);
@@ -137,8 +162,14 @@ grid on;
 xlim(doppler_display/1e3);
 ylim(range_display);
 hold on;
-plot(fd_body_theory/1e3, R_body_theory, 'ro', 'MarkerSize', 10, 'LineWidth', 2);
-legend('RD Spectrum','Body (theory)','Location','best');
+if abs(v) > v_max_unamb
+    plot(fd_body_apparent/1e3, R_body_theory, 'ro', 'MarkerSize', 12, 'LineWidth', 2, 'MarkerFaceColor', 'r');
+    plot(fd_body_theory/1e3, R_body_theory, 'bx', 'MarkerSize', 12, 'LineWidth', 2);
+    legend('RD Spectrum','Body (apparent, aliased)','Body (true, out of range)','Location','best');
+else
+    plot(fd_body_theory/1e3, R_body_theory, 'ro', 'MarkerSize', 10, 'LineWidth', 2);
+    legend('RD Spectrum','Body (theory)','Location','best');
+end
 
 %% 打印参数信息
 fprintf('\n========== RD Spectrum Parameters ==========\n');
@@ -153,17 +184,32 @@ fprintf('Range resolution:           %.3f m\n', range_res);
 fprintf('Doppler resolution:         %.3f Hz\n', doppler_res);
 fprintf('Frequency resolution:       %.2f Hz\n', freq_res_range);
 fprintf('\n--- Max Unambiguous ---\n');
-% 最大不模糊距离：基于奈奎斯特，最大差拍频率 = Fs/2
-R_max_unamb = (Fs/2) * c / (2*k);
-fprintf('Max unambiguous range:      %.2f m\n', R_max_unamb);
+% 最大不模糊距离：基于奈奎斯特采样定理
+% 能无混叠测量的最大差拍频率是 Fs/2
+R_max_sampling = (Fs/2) * c / (2*k);
+% 在真实多chirp雷达中，还受chirp时长限制（信号往返时间）
+R_max_chirp = c * Tc / 2;
+% 实际最大不模糊距离取两者较小值
+R_max_unamb = min(R_max_sampling, R_max_chirp);
+fprintf('Max unamb. range (sampling): %.2f m (%.1f km)\n', R_max_sampling, R_max_sampling/1e3);
+fprintf('Max unamb. range (chirp):    %.2f m (%.1f km)\n', R_max_chirp, R_max_chirp/1e3);
+fprintf('Effective max range:         %.2f m (%.1f km)\n', R_max_unamb, R_max_unamb/1e3);
 % 最大不模糊速度：基于PRF = 1/Tc，最大多普勒 = PRF/2
 v_max_unamb = (1/(2*Tc)) * lambda/2;
-fprintf('Max unambiguous velocity:   %.2f m/s\n', v_max_unamb);
+fprintf('Max unambiguous velocity:    %.2f m/s\n', v_max_unamb);
 fprintf('PRF (pulse repetition freq): %.2f Hz\n', 1/Tc);
 fprintf('\n--- Body Theoretical Values ---\n');
 fprintf('Body position (R):          %.2f m\n', R_body_theory);
-fprintf('Body velocity (v):          %.2f m/s\n', v);
-fprintf('Body Doppler (fd):          %.2f Hz (%.3f kHz)\n', fd_body_theory, fd_body_theory/1e3);
+fprintf('Body velocity (v):          %.2f m/s', v);
+if abs(v) > v_max_unamb
+    fprintf(' [AMBIGUOUS!]\n');
+    fprintf('True Doppler (fd):          %.2f Hz (%.3f kHz) [out of range]\n', fd_body_theory, fd_body_theory/1e3);
+    fprintf('Apparent Doppler (aliased): %.2f Hz (%.3f kHz) [shown in RD]\n', fd_body_apparent, fd_body_apparent/1e3);
+    fprintf('Aliasing factor:            %.1f × PRF\n', fd_body_theory/PRF);
+else
+    fprintf('\n');
+    fprintf('Body Doppler (fd):          %.2f Hz (%.3f kHz)\n', fd_body_theory, fd_body_theory/1e3);
+end
 fprintf('Expected beat freq:         %.2f Hz (%.3f kHz)\n', 2*k*R_body_theory/c, 2*k*R_body_theory/c/1e3);
 fprintf('\n--- Display Range ---\n');
 fprintf('Range display:              [%.1f, %.1f] m\n', range_display(1), range_display(2));
