@@ -25,9 +25,12 @@ for i = 1:N_chirp
 end
 
 % CRITICAL: FMCW雷达的差拍频率始终为正，只需要单边谱
-% 取前半部分（0 到 Fs/2，对应正频率）
-N_range_bins = Nfft_range/2;
-S_range = S_range(1:N_range_bins, :);  % 只保留正频率部分
+% 但还要考虑有效频率范围的限制
+% 在chirp时长Tc内，最大差拍频率 = k * Tc
+f_beat_max = k * Tc;  % 单个chirp内的最大有效差拍频率
+freq_res_fft = Fs / Nfft_range;
+N_range_bins = min(ceil(f_beat_max / freq_res_fft), Nfft_range/2);
+S_range = S_range(1:N_range_bins, :);  % 只保留有效的正频率部分
 
 %% Doppler FFT（多普勒向FFT）
 Nfft_doppler = 2^nextpow2(N_chirp);
@@ -41,11 +44,14 @@ end
 %% 计算坐标轴
 % 距离轴：基于Range FFT后的频率bin转换为实际距离
 % 在FMCW雷达中：f_beat = 2*k*R/c，因此 R = f_beat * c / (2*k)
-% IMPORTANT: 只使用正频率部分 [0, Fs/2]
-freq_res_range = Fs / Nfft_range;                               % 频率分辨率 [Hz]
-freq_axis_range = (0:N_range_bins-1) * freq_res_range;         % 频率轴 [Hz]，只到Fs/2
+% IMPORTANT: 单个chirp的有效带宽 B_eff = k*Tc，不是总带宽B
+freq_res_range = Fs / Nfft_range;                               % FFT频率分辨率 [Hz]
+freq_axis_range = (0:N_range_bins-1) * freq_res_range;         % 有效频率轴 [Hz]
 range_axis = freq_axis_range * c / (2*k);                       % 距离轴 [m]
-range_res = c / (2*B);                                          % 理论距离分辨率 [m]
+
+% 实际距离分辨率基于单个chirp的有效带宽
+B_chirp_effective = k * Tc;                                     % 单chirp有效带宽
+range_res = c / (2 * B_chirp_effective);                        % 实际距离分辨率 [m]
 
 % 多普勒轴
 doppler_res = 1 / (N_chirp * Tc);                               % 多普勒分辨率 [Hz]
@@ -181,29 +187,33 @@ end
 
 %% 打印参数信息
 fprintf('\n========== RD Spectrum Parameters ==========\n');
+fprintf('Total signal duration (T):  %.1f ms\n', T*1e3);
+fprintf('Total bandwidth (B):        %.2f MHz\n', B/1e6);
+fprintf('Overall chirp rate (k):     %.2e Hz/s\n', k);
+fprintf('\n--- Per-Chirp Parameters ---\n');
 fprintf('Chirp duration (Tc):        %.3f ms\n', Tc*1e3);
+fprintf('Effective chirp bandwidth:  %.2f kHz\n', B_chirp_effective/1e3);
 fprintf('Number of chirps:           %d\n', N_chirp);
 fprintf('Samples per chirp:          %d\n', N_per_chirp);
 fprintf('Sampling rate:              %.2f MHz\n', Fs/1e6);
-fprintf('Chirp bandwidth:            %.2f MHz\n', B/1e6);
-fprintf('Chirp rate (k):             %.2e Hz/s\n', k);
+fprintf('Valid range bins:           %d (of %d FFT bins)\n', N_range_bins, Nfft_range/2);
 fprintf('\n--- Resolution ---\n');
 fprintf('Range resolution:           %.3f m\n', range_res);
 fprintf('Doppler resolution:         %.3f Hz\n', doppler_res);
 fprintf('Frequency resolution:       %.2f Hz\n', freq_res_range);
-fprintf('\n--- Max Unambiguous ---\n');
-% 最大不模糊距离：基于奈奎斯特采样定理
-% 能无混叠测量的最大差拍频率是 Fs/2
-R_max_sampling = (Fs/2) * c / (2*k);
-% 在真实多chirp雷达中，还受chirp时长限制（信号往返时间）
+fprintf('\n--- Max Unambiguous Ranges ---\n');
+% 最大距离受多个因素限制：
+% 1. Chirp时长限制（信号往返时间）
 R_max_chirp = c * Tc / 2;
-% 基于实际FFT长度的最大可测距离
+% 2. 有效带宽限制（最大差拍频率 = k*Tc）
+R_max_bandwidth = f_beat_max * c / (2*k);
+% 3. FFT实际计算范围
 R_max_fft = range_axis(end);
-% 实际最大不模糊距离取最小值
-R_max_unamb = min([R_max_sampling, R_max_chirp, R_max_fft]);
-fprintf('Max range (sampling):        %.2f m (%.1f km)\n', R_max_sampling, R_max_sampling/1e3);
+% 实际最大不模糊距离（三者一致）
+R_max_unamb = min([R_max_chirp, R_max_bandwidth, R_max_fft]);
 fprintf('Max range (chirp duration):  %.2f m (%.1f km)\n', R_max_chirp, R_max_chirp/1e3);
-fprintf('Max range (FFT):             %.2f m (%.1f km)\n', R_max_fft, R_max_fft/1e3);
+fprintf('Max range (bandwidth):       %.2f m (%.1f km)\n', R_max_bandwidth, R_max_bandwidth/1e3);
+fprintf('Max range (FFT bins):        %.2f m (%.1f km)\n', R_max_fft, R_max_fft/1e3);
 fprintf('Effective max range:         %.2f m (%.1f km)\n', R_max_unamb, R_max_unamb/1e3);
 % 最大不模糊速度：基于PRF = 1/Tc，最大多普勒 = PRF/2
 v_max_unamb = (1/(2*Tc)) * lambda/2;
